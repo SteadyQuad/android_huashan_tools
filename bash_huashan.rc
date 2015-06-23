@@ -1,0 +1,91 @@
+# ======================================
+#   Developed by Adrian DC - 2015-2016
+# ======================================
+
+# === Repo FullSync ===
+reposa()
+{
+  # Phone Name
+  PhoneName="huashan";
+
+  # Sources Sync
+  repopickcommits=1;
+  if [[ "$@" =~ "test" ]]; then
+    repo forall -c 'gitbranch=${REPO_RREV##*/}; \
+                    echo "Reseting project ${REPO_PROJECT} [${REPO_REMOTE}/${gitbranch}]"; \
+                    git rebase --abort >/dev/null 2>&1; \
+                    git stash -u >/dev/null 2>&1; \
+                    git reset --hard ${REPO_REMOTE}/${gitbranch} >/dev/null 2>&1;';
+  elif [[ "$@" =~ "stock" ]]; then
+    repopickcommits=0;
+    repo forall -c 'gitbranch=${REPO_RREV##*/}; \
+                    gitremote=${REPO_REMOTE}; \
+                    if [ "$gitremote"="AdrianDC" ]; then gitremote="CyanogenMod"; fi; \
+                    echo "Reseting project ${REPO_PROJECT} [${gitremote}/${gitbranch}]"; \
+                    git rebase --abort >/dev/null 2>&1; \
+                    git stash -u >/dev/null 2>&1; \
+                    git reset --hard ${gitremote}/${gitbranch} >/dev/null 2>&1;';
+  elif [[ "$@" =~ "simple" ]]; then
+    repopickcommits=0;
+    repo forall -c 'echo "Cleaning project ${REPO_PROJECT}"; \
+                    git rebase --abort >/dev/null 2>&1; \
+                    git stash -u >/dev/null 2>&1; \
+                    git reset --hard HEAD >/dev/null 2>&1;';
+    repo sync --current-branch --detach --force-broken --force-sync;
+  else
+    repo forall -c 'echo "Cleaning project ${REPO_PROJECT}"; \
+                    git rebase --abort >/dev/null 2>&1; \
+                    git stash -u >/dev/null 2>&1; \
+                    git reset --hard HEAD >/dev/null 2>&1;';
+    repo sync --current-branch --detach --force-broken --force-sync;
+  fi;
+
+  # Sources Commands
+  source ./build/envsetup.sh;
+
+  # Phone Init
+  breakfast $PhoneName;
+
+  # Cherry-picks List
+  repolist=( \
+             # TOREMEMBER: Settings QuickBoot "113584" \
+             # TOHACKINTO: Optimizations "121170" \
+
+             # PENDING REVIEW: Music, charger
+             "121020 120969" \
+
+             # WIP: Temp stack
+             "129796 129795 130415 131627 129827 129410" \
+             "130741 130742 132131" \
+
+             # WIP: Messaging
+             "129988 130709 130711" \
+           );
+
+  # Cherry-picks Repopick
+  if [ $repopickcommits != 0 ]; then
+    for i in "${repolist[@]}"; do
+
+      if [ ! -z "$i" ]; then
+        echo "";
+        echo " V=========== RepoPick $i ===========V";
+        echo "";
+
+        repopicklog=$(repopick $i | tee /dev/tty);
+
+        if [[ "$repopicklog" =~ "ERROR:" ]]; then
+          echo "";
+          return;
+        fi;
+      fi;
+
+    done;
+  fi;
+
+  # Sync End
+  notify-send "Done syncing !";
+  echo " =========== Done syncing ===========";
+  echo "";
+}
+
+export -f reposa;

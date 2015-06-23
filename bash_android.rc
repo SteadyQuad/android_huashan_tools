@@ -1,0 +1,732 @@
+# =================================
+#   Developed by Adrian DC - 2015
+# =================================
+
+# === Local Paths ===
+bash_android_dir=$(dirname ${BASH_SOURCE[0]});
+source "$bash_android_dir/bash_gerrit.rc";
+source "$bash_android_dir/bash_huashan.rc";
+source "$bash_android_dir/bash_legacyxperia.rc";
+
+# === Clear Screen ===
+alias cls='echo -e \\033c; clear';
+
+# === Clipboard ===
+function toclip() { xclip -selection c; }
+
+# === Bash Scripts ===
+alias bashup='bashfolder="/media/adriandc/AndroidDev/Bash"; \
+              source "$bashfolder/bash_android.rc"; \
+              source "$bashfolder/bash_gerrit.rc"; \
+              source "$bashfolder/bash_huashan.rc"';
+
+# === Repo shortcuts ===
+function repor()
+{
+  local currentdir=${PWD};
+  while [[ "${PWD}" != '/' && ! -d './.repo' ]]; do
+    cd ..;
+  done;
+  if [ ! -d './.repo' ]; then
+    cd $currentdir;
+  fi;
+}
+function repos()
+{
+  local currentdir=${PWD}; repor;
+  if [ -f ./build/envsetup.sh ]; then
+    local device=$(getine "$1" "huashan");
+    source ./build/envsetup.sh; croot;
+    breakfast $device;
+  else
+    echo "Android Repo not found...";
+  fi;
+  cd "$currentdir";
+}
+alias repolx='nano .repo/local_manifests/updates.sh; .repo/local_manifests/updates.sh';
+alias reposi='repo sync .';
+alias reposif='repo sync --current-branch --detach --force-broken --force-sync';
+alias repop='repopick';
+
+# === Repo TWRP ===
+repotwrp()
+{
+  # Phone huashan
+  PhoneName="huashan";
+
+  if [ -z "$1" ]; then
+
+    # Sources Sync
+    repo sync --current-branch --detach --force-broken --force-sync;
+    repopick 16807;
+
+    # Clean
+    make clean;
+
+  fi;
+
+  # Make recovery
+  source ./build/envsetup.sh;
+  breakfast $PhoneName;
+  make recoveryimage;
+  echo "";
+  echo "  [ make recoveryimage ]";
+  echo "";
+
+  # Flash new image
+  printf "  Flash TWRP to FOTA (Y/n) ? ";
+  read key;
+  TWRPImg=./out/target/product/$PhoneName/recovery.img;
+  if [[ "$key" != "n" && "$key" != "N" ]] && [ -f $TWRPImg ]; then
+    echo "";
+    adb root;
+    adb wait-for-device;
+    adb push $TWRPImg /tmp/twrp.img;
+    if [ ! -z "$(adb shell 'ls /system/bin/dd 2> /dev/null')" ]; then
+      adb shell /system/bin/dd if=/tmp/twrp.img of=/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel;
+    else
+      adb shell /sbin/dd if=/tmp/twrp.img of=/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel;
+    fi;
+    adb reboot recovery;
+  fi;
+  echo "";
+}
+
+# === ADB shortcuts ===
+alias adbr='adb wait-for-devices; adb root; sleep 2; adb wait-for-devices; adb remount; sleep 1; adb wait-for-devices';
+alias adbs='adb shell';
+alias adbpr='adb reboot';
+alias adbpo='adb shell reboot -p';
+alias adbscr='adb shell screencap /sdcard/screenshot.png; adb pull /sdcard/screenshot.png';
+alias adbfotaf='adb root; adbs dd if=/dev/zero of=/dev/block/mmcblk0p11';
+
+# === ADB updates ===
+function adbupdate()
+{
+  adb version;
+  wget -O - https://skia.googlesource.com/skia/+archive/cd048d18e0b81338c1a04b9749a00444597df394/platform_tools/android/bin/linux.tar.gz | tar -zxvf - adb;
+  sudo mv adb /usr/bin/adb;
+  sudo chmod +x /usr/bin/adb;
+  adb version;
+}
+
+# === Fastboot shortcuts ===
+function fboot() { sudo adb reboot bootloader;
+                   sudo fastboot flash boot $(getine "$1" "boot.img");
+                   sudo fastboot reboot; }
+
+function fboota() { logfile=/media/adriandc/AndroidDev/Scripts/script_logs.txt;
+                    mms bootimage | tee $logfile;
+                    BootImg=$(grep ".*image.*boot\.img" $logfile \
+                            | sed "s/.*: \(.*boot\.img\).*/\1/g" | uniq | head -1);
+                    if [ ! -z "$BootImg" ] && [ -f "$BootImg" ]; then
+                      echo ""; echo "$BootImg:"; echo "";
+                      fboot "$BootImg";
+                    fi;
+                    echo ""; }
+
+# === ADB Pushes ===
+function adbpf()
+{
+  if [ ! -z "$1" ]; then
+    for filepath in $@; do
+      if [ -d "$filepath" ]; then
+        adbpv "$filepath/"*;
+      else
+        file=$(printf "$filepath" | sed "s/.*\(\/system.*\)/\1/g");
+        echo ""; echo -e " \e[1;37m$file:\e[0m";
+        printf "  "; adb shell ls -l "$file" | cut -c 30-;
+        printf "   "; adb push "$filepath" "$file";
+      fi;
+    done;
+    echo "";
+  fi;
+}
+function adbpv()
+{
+  if [ ! -z "$1" ]; then
+    for filepath in $@; do
+      if [ -d "$filepath" ]; then
+        adbpv "$filepath/"*;
+      else
+        file=$(printf "$filepath" | sed "s/.*\/proprietary\(.*\)/\/system\1/g");
+        echo ""; echo -e "\e[1;36m $file:\e[0m";
+        printf "  "; adb shell ls -l "$file" | cut -c 30-;
+        printf "   "; adb push "$filepath" "$file";
+      fi;
+    done;
+    echo "";
+  fi;
+}
+alias adbp='adbr; adbpf';
+
+# === Research shortcuts ===
+function highlight() { perl -pe "s/$1/\e[1;0;31m$&\e[0m/ig"; }
+function grepb() { grep -air --exclude={*.o,*.a,*.cmd,*.ko} --exclude-dir="\.git" --exclude-dir="\.repo" "$*" .; }
+function grepbn() { grep -ailr --color=never --exclude={*.o,*.a,*.cmd,*.ko} --exclude-dir="\.git" --exclude-dir="\.repo" "$*" .; }
+alias grepi='grep -i';
+alias g='grepb';
+alias gn='grepbn';
+function glc() { grep --include \*.c --include \*.cpp --include \*.h -anr '.\{80,\}' .; }
+function glj() { grep --include \*.java -anr '.\{100,\}' .; }
+function gle() { grep --include \*.c --include \*.cpp --include \*.h  --include \*.java -anr '.* $' .; }
+
+# === Debug shortcuts ===
+function sepaud() { cat $1 | grep denied; cat $1 | grep denied | audit2allow -p sepolicy; }
+alias adbl='while [ 1 ]; do cls; printf "" >adb.log; adb logcat -v threadtime *:V -C | tee -a adb.log;
+            echo ""; printf "Press Enter to continue... "; read key; done';
+alias adblb='while [ 1 ]; do cls; printf "" >adb.log; adb logcat -v audit2allow *:V | tee -a adb.log;
+             echo ""; printf "Press Enter to continue... "; read key; done';
+alias adblc='adb logcat -c; adbl';
+alias adbk='adbr; printf "" >kmsg; adb shell cat /proc/kmsg | tee -a kmsg';
+alias adbkl='cls; adbr; printf "" >last_kmsg; adb shell cat /proc/last_kmsg | tee -a last_kmsg';
+alias adbkld='cls; printf "" >last_kmsg; adb shell cat /proc/last_kmsg | tee -a last_kmsg';
+alias adbse='adbr; printf "" >kmsg; adb shell cat /proc/kmsg | tee -a kmsg; sepaud kmsg';
+alias adbsel='adbkl; sepaud kmsg';
+alias adblf='adb logcat -v audit2allow';
+alias adblh='adb logcat -b events -b main -b radio | highlight';
+alias adbintents='adb shell dumpsys package r > intents.txt';
+function adblcln() { cat $1 | cut -c 32- | tee $1.clean; }
+alias adblkl='adb root; adb wait-for-device; adb shell killall zigote; adbl';
+function adbpk() { pid=$(adb shell ps | grep mediaserver | awk '{ print $2 }');
+                   adb root; adb wait-for-device;
+                   adb logcat -c;
+                   adb shell kill $pid;
+                   adb shell ps | grep mediaserver;
+                   sleep 2; adbl; }
+function adbms() { pid=$(adb shell ps | grep mediaserver | awk '{ print $2 }');
+                   adb root; adb wait-for-device;
+                   adb logcat -c;
+                   adb shell kill $pid;
+                   pid=$(adb shell ps | grep mediaserver | awk '{ print $2 }');
+                   adb shell strace -p $pid; }
+function adbcl() { filename=$(getine $1 adb.log);
+                   cat "$filename" | cut -c 32- | sed -E "s/[0-9]{8}/00000000/g" > "$filename.cut.log"; }
+function adblibs() { adb shell grep -air "$1" $(getine $2 /system/lib/); }
+alias ndkstack='ndk-stack -sym /media/adriandc/AndroidDev/CM-13.0/out/target/product/huashan/symbols -dump';
+function adbwtch() { adbr; while [ 1 ]; do adb shell cat "$1"; done; }
+
+# === Git helpers ===
+function foreachdir()
+{
+  bashfolder="/media/adriandc/AndroidDev/Bash";
+  source "$bashfolder/bash_android.rc";
+  source "$bashfolder/bash_huashan.rc";
+  dircur=$(pwd);
+  listdir=$(find "$dircur" -maxdepth 1 -type d | sort);
+  for directory in $listdir
+  do
+    if [[ ! "$directory" == "$dircur" ]] && [ -d "$directory" ]; then
+      cd "$directory";
+      echo "";
+      echo " === $(basename $directory) ===";
+      echo "";
+      $@
+    fi;
+  done;
+  echo "";
+  cd "$dircur";
+}
+
+# === Log Cleaner ===
+function logcl() { cat $1 | sed 's/0x[[:xdigit:]]\{8,8\}/0xaddress/g' | tr -d '\015' > $1.clean; }
+
+# === ADB Tests ===
+function adbfb() { adbr; adbs mv $1 $1.temp; }
+function adbfr() { adbr; adbs mv $1.temp $1; }
+
+# === Kill and Log Debug ===
+function adblk()
+{
+  printf "Process name : ";
+  if [ ! -z "$1" ]; then
+    name="$1"; echo "";
+  else
+    read name;
+  fi;
+  echo -e \\033c; clear;
+  adbs ps | grep -i $name;
+  adb logcat -c;
+  adb shell pkill -f $name;
+  adbs ps | grep -i $name;
+  printf "" >adb.log;
+  adb logcat | tee -a adb.log;
+}
+
+# === Binary Editor ===
+function binaryeditor()
+{
+  if [ -z "$3" ]; then
+    echo " Usage : binaryeditor binarypath pattern replacement";
+    return;
+  fi;
+
+  local FILE="$1";
+  local PATTERN="$2";
+  local REPLACEMENT="$3";
+
+  # Find all unique strings in FILE that contain the pattern 
+  STRINGS=$(strings ${FILE} | grep ${PATTERN} | sort -u -r);
+
+  if [ ! -z "${STRINGS}" ]; then
+    echo "File '${FILE}' contain strings with '${PATTERN}' in them:"
+
+    for OLD_STRING in ${STRINGS};
+    do
+      # Create the new string with a simple bash-replacement
+      NEW_STRING=${OLD_STRING//${PATTERN}/${REPLACEMENT}};
+
+      # Create null terminated ASCII HEX representations of the strings
+      OLD_STRING_HEX="$(echo -n ${OLD_STRING} | xxd -g 0 -u -ps -c 256)00";
+      NEW_STRING_HEX="$(echo -n ${NEW_STRING} | xxd -g 0 -u -ps -c 256)00";
+
+      if [ ${#NEW_STRING_HEX} -le ${#OLD_STRING_HEX} ]; then
+        # Pad the replacement string with null terminations so the
+        # length matches the original string
+        while [ ${#NEW_STRING_HEX} -lt ${#OLD_STRING_HEX} ];
+        do
+          NEW_STRING_HEX="${NEW_STRING_HEX}00";
+        done;
+
+        # Now, replace every occurrence of OLD_STRING with NEW_STRING 
+        echo -n "Replacing ${OLD_STRING} with ${NEW_STRING}... ";
+        hexdump -ve '1/1 "%.2X"' ${FILE} | \
+          sed "s/${OLD_STRING_HEX}/${NEW_STRING_HEX}/g" | \
+          xxd -r -p > ${FILE}.tmp;
+        chmod --reference ${FILE} ${FILE}.tmp;
+        mv ${FILE}.tmp ${FILE};
+        echo "Done!";
+      else
+        echo "New string '${NEW_STRING}' is longer than old" \
+          "string '${OLD_STRING}'. Skipping.";
+      fi;
+    done;
+  fi;
+}
+
+# === Shared assets ===
+function getine() { if [ ! -z "$1" ]; then printf $1; else printf $2; fi; }
+
+# === Backtracing shortcuts ===
+alias adebug='repor; repos; adbr; \
+              adb shell setprop debug.db.uid 100000; \
+              adb forward tcp:5039 tcp:5039; \
+              gdbclient /system/bin/mediaserver :5039 1141';
+alias ad2li='addr2line -f -e /media/adriandc/AndroidDev/CM-13.0/out/target/product/huashan/symbols/system/lib/libc.so';
+
+# === WIP shortcuts ===
+alias meldh='meld /media/adriandc/AndroidDev/CM-13.0/device/sony/huashan /media/adriandc/AndroidDev/Paths/gerrit-huashan';
+alias meldk='meld /media/adriandc/AndroidDev/CM-13.0/kernel/sony/msm8960t /media/adriandc/AndroidDev/Files/GitHub/msm8x60';
+alias permme='UserName="$(whoami)"; sudo chown -cRv $UserName:$UserName ./';
+alias touchall='find . -mindepth 1 -exec touch {} \;';
+alias dlog='path=$(xdg-user-dir DESKTOP); xargs log.$(date).log';
+alias makedefconf='export ARCH=arm; export SUBARCH=arm; make cm_viskan_huashan_defconfig; \
+                   meld ./.config ./arch/arm/configs/cm_viskan_huashan_defconfig; make mrproper';
+alias lsmk='ls -1 | sed "s/\(.*\)/    utils\/\1 \\\/"';
+function gitkdev()
+{
+  chromium-browser https://github.com/CyanogenMod/android_kernel_sony_msm/blob/cm-13.0/$1;
+  chromium-browser https://github.com/CyanogenMod/android_kernel_google_msm/blob/cm-13.0/$1;
+  chromium-browser https://github.com/CyanogenMod/android_kernel_sony_msm8960t/blob/cm-12.1/$1;
+}
+
+# === Apps shortcuts ===
+function adbu() { echo ""; echo " [ Launching '$1' ]"; echo ""; \
+                  echo "    Optimizing..."; adb shell pm force-dex-opt $1; \
+                  echo "    Killing..."; adb shell pkill $1; echo ""; }
+function ntf() { notify-send "$*"; }
+
+# === Build installs ===
+alias adbconfirm='if [ ! -z "$confirm" ]; then printf " Press Enter to continue..."; read key; echo ""; fi';
+function adbif()
+{
+  logfile=/media/adriandc/AndroidDev/Scripts/script_logs.txt;
+  $@ | tee $logfile;
+  #InstallLog=$(grep "Install:.*target/product/system" $logfile | sort | uniq);
+  InstallLog=$(grep "target/product/.*/system" $logfile | sort | uniq);
+  echo "";
+  adbconfirm;
+  for FilePath in ${InstallLog[*]}
+  do
+    if [[ "$FilePath" =~ "/system" ]]; then
+      FilePath=$(printf "$FilePath" | tail -1 \
+               | sed "s/\x1B\[[0-9;]*[JKmsu]//g" \
+               | sed "s/.*\/\([^\[]*.zip\).*/\1/g");
+      adbpf "$FilePath";
+    fi;
+  done;
+  echo "";
+  confirm="";
+}
+function adbiv()
+{
+  logfile=/media/adriandc/AndroidDev/Scripts/script_logs.txt;
+  $@ | tee $logfile;
+  Proprietary=$(grep "Binary.*proprietary/.*" $logfile \
+              | sed "s/.* b\/\(.*proprietary\/.*\) .*/\1/g" \
+              | sort | uniq);
+  echo "";
+  for FilePath in ${Proprietary[*]}
+  do
+    if [ -f "$FilePath" ]; then
+      FileTarget=$(echo $FilePath \
+                 | sed "s/.*proprietary\/\(.*\)/\/system\/\1/g");
+      printf "$FileTarget: ";
+      adb push $FilePath $FileTarget;
+    fi;
+  done;
+  echo "";
+  confirm="";
+}
+alias adbi='adbr; confirm=""; adbif';
+alias adbii='confirm=""; adbif';
+alias adbic='adbr; confirm="true"; adbif';
+
+# === Build paths ===
+export bash_android_flashable_zip=$bash_android_dir/android_files/flashable_template.zip;
+export bash_android_sign_apk_dir=$bash_android_dir/android_signapk;
+
+# === Build zip ===
+function mmmzip()
+{
+  CurDir=$(pwd);
+  TmpDir=$(mktemp -d);
+  BuildParams="$@";
+  LogFile="$TmpDir/mmm_logs.txt";
+  OutFile="pack-"$(date +'%Y%m%d-%H%M')"-$(basename $(readlink -f $1))-${PhoneName}.zip";
+  TargetFile="$(xdg-user-dir DESKTOP)/$OutFile";
+
+  if [ -z "$BuildParams" ]; then
+    BuildParams=".";
+  fi;
+
+  echo "";
+  if [ -d "$(readlink -f $1)" ]; then
+    mmm -B $BuildParams | tee $LogFile;
+  else
+    mka $BuildParams | tee $LogFile;
+  fi;
+  Installs=$(grep "target/product/.*/system" $LogFile | sort | uniq);
+
+  FilesList="";
+  for FilePath in ${Installs[*]}
+  do
+    if [[ "$FilePath" =~ "/system" ]]; then
+      FilePath=$(printf "$FilePath" | tail -1 \
+               | sed "s/\x1B\[[0-9;]*[JKmsu]//g" \
+               | sed "s/.*\/\([^\[]*.zip\).*/\1/g");
+      FileTarget=$(echo $FilePath \
+                 | sed "s/.*\(system\/.*\)/\1/g");
+      FileDir=$(dirname $FileTarget);
+      if [ ! -d "$TmpDir/$FileDir" ]; then
+        mkdir -p "$TmpDir/$FileDir";
+      fi;
+      if [ -f "$FilePath" ]; then
+        cp "$FilePath" "$TmpDir/$FileTarget";
+        FilesList="$FilesList ./$FileTarget";
+      fi;
+    fi;
+  done;
+
+  cd "$TmpDir/";
+  cp "$bash_android_flashable_zip" "$TmpDir/$OutFile.unsigned.zip";
+  zip -g "$TmpDir/$OutFile.unsigned.zip" $FilesList;
+  java -jar "$bash_android_sign_apk_dir/signapk-cm121.jar" \
+       -w "$bash_android_sign_apk_dir/testkey.x509.pem" \
+       "$bash_android_sign_apk_dir/testkey.pk8" \
+       "$TmpDir/$OutFile.unsigned.zip" \
+       "$TmpDir/$OutFile";
+  rm -f "$TmpDir/$OutFile.unsigned.zip";
+  cp "$TmpDir/$OutFile" "$TargetFile";
+  echo "";
+  echo -e " \e[1;37mPackage File:\e[0m $TargetFile";
+  echo "";
+
+  rm -rf "$TmpDir";
+  cd "$CurDir";
+}
+
+# === Build TWRP ===
+function mktwrp()
+{
+  CurDir=$(pwd);
+  TmpDir=$(mktemp -d);
+  BuildParams="$@";
+  LogFile="$TmpDir/mmm_logs.txt";
+  OutFile="TWRP-"$(date +'%Y%m%d-%H%M')"-$(basename $(readlink -f $1))-${PhoneName}.zip";
+  TargetFile="$(xdg-user-dir DESKTOP)/$OutFile";
+
+  if [ -z "$BuildParams" ]; then
+    BuildParams=".";
+  fi;
+
+  echo "";
+  mka recoveryimage;
+
+  if [ -f ]; then
+    cp "$FilePath" "$TmpDir/$FileTarget";
+    FilesList="$FilesList ./$FileTarget";
+  fi;
+
+  cd "$TmpDir/";
+  cp "$bash_android_flashable_zip" "$TmpDir/$OutFile.unsigned.zip";
+  zip -g "$TmpDir/$OutFile.unsigned.zip" $FilesList;
+  java -jar "$bash_android_sign_apk_dir/signapk-cm121.jar" \
+       -w "$bash_android_sign_apk_dir/testkey.x509.pem" \
+       "$bash_android_sign_apk_dir/testkey.pk8" \
+       "$TmpDir/$OutFile.unsigned.zip" \
+       "$TmpDir/$OutFile";
+  rm -f "$TmpDir/$OutFile.unsigned.zip";
+  cp "$TmpDir/$OutFile" "$TargetFile";
+  echo "";
+  echo -e " \e[1;37mPackage File:\e[0m $TargetFile";
+  echo "";
+
+  rm -rf "$TmpDir";
+  cd "$CurDir";
+}
+
+# === Git vars ===
+gitbranchdefault='cm-13.0';
+gituserdefault='AdrianDC';
+gitremotedefault='AdrianDC';
+gitreviewdefault='github';
+gitrebasedefault=25;
+
+# === Git commits ===
+alias gitc='git commit';
+alias gitcs='git commit -s';
+alias gitca='git commit --amend';
+alias gitcae='git commit --amend --no-edit';
+alias gitcid='scp -p -P 29418 $gituserdefault@review.cyanogenmod.org:hooks/commit-msg .git/hooks/; chmod u+x ./.git/hooks/commit-msg; gitca';
+
+# === Git assets ===
+function gitfetchtreset() { git fetch $(getine $1 $gitremotedefault) $(getine $2 $gitbranchdefault); git reset FETCH_HEAD --hard; }
+function gitfetchtcheckout() { remote=$(getine $1 $gitremotedefault); branch=$(getine $2 $gitbranchdefault); git fetch $remote $branch; git checkout $remote/$branch; }
+
+# === Git fetching ===
+alias gitf='git fetch';
+alias gitfmr='git fetch origin; git reset origin/master';
+alias gitfs='git fetch origin; git reset origin/$(git rev-parse --abbrev-ref HEAD); git stash';
+alias gitfsu='git fetch origin; git reset origin/$(git rev-parse --abbrev-ref HEAD); git stash -p';
+alias gitfgr='gitfetchtreset github';
+alias gitfir='gitfetchtreset aicp lp5.1';
+alias gitfor='gitfetchtreset origin';
+alias gitfar='gitfetchtreset $gitremotedefault';
+alias gitfsr='gitfetchtreset source';
+alias gitfgc='gitfetchtcheckout github';
+
+# === Git pushing ===
+function gitpu() { remote=$(getine $1 gitremotedefault); branch=$(getine $2 $gitbranchdefault); \
+                   git fetch $remote $branch; git push -f $remote HEAD:refs/heads/$branch; }
+alias gitpa='gitpu $gitremotedefault';
+function gitpo() { command="git push origin $(getine $1 $gitbranchdefault)"; \
+                   echo ""; printf " \e[1;31mTarget: \e[0m";
+                   git remote -v | grep origin | head -1 | cut -f2 | cut -d' ' -f1;
+                   echo -e " \e[1;37mCommand: $command\e[0m"; printf "    > Proceed with origin push (y/N) ? "; read key; \
+                   if [[ "$key" == "y" || "$key" == "Y" ]]; then echo ""; $command; fi; echo ""; }
+alias gitpf='git push -f';
+function gitck() { branch=$(getine $1 $gitbranchdefault); git fetch github $branch >/dev/null; git diff HEAD github/$branch; }
+function gitcn() { branch=$(getine $1 $gitbranchdefault); git fetch github $branch; git diff HEAD github/$branch; }
+
+# === Git resetting ===
+alias gitrh='git reset FETCH_HEAD --hard';
+alias githd='git reset HEAD --hard';
+alias gitcl='git reset HEAD --hard; git stash -u';
+alias gitro='git reset HEAD^ --hard';
+alias gitsl='git reset HEAD^; gitap; gitcae';
+alias gitrl='git revert HEAD -n; git commit -m "Revert"; git reset HEAD^; git add -p';
+alias gitri='git reset HEAD^';
+alias gitrt='git reset --hard';
+
+# === Git rebasing ===
+function gitr() { git rebase HEAD~$(getine $1 $gitrebasedefault) -i; }
+alias gitra='git rebase --abort';
+alias gitrc='git rebase --continue';
+alias gitre='git rebase --edit-todo';
+alias gitrs='git rebase --skip';
+function gitrb()  { branch=$(getine $1 $gitbranchdefault); git fetch github $branch; git rebase github/$branch; }
+function gitrbo() { branch=$(getine $1 $gitbranchdefault); git fetch origin $branch; git rebase origin/$branch; }
+
+# === Git branch ===
+function gitbc() { branch=$(getine $1 $gitbranchdefault); review=$(getine $2 $gitreviewdefault);
+                   git fetch $review $branch; git branch $branch --track $review/$branch; git checkout $branch; }
+function gitbt() { branch=$(getine $1 $gitbranchdefault); git branch $branch; git checkout $branch; }
+alias gitbd='git branch -D';
+alias gitbv='git fetch $gitreviewdefault $(git rev-parse --abbrev-ref HEAD); git branch -v';
+function gitbvv() { branch=$(getine $1 $gitbranchdefault);
+                    git fetch origin $branch;
+                    git branch tempbck;
+                    git branch -D $branch;
+                    git branch $branch --track origin/$branch;
+                    git checkout $branch;
+                    git reset --hard tempbck;
+                    git branch -D tempbck;
+                    echo ""; gitbv; }
+alias gitrv='git remote -v';
+alias gitch='git checkout';
+alias gitbaclean='git fetch $gitremotedefault; git branch -r | grep $gitremotedefault | sed "s/$gitremotedefault\/\(.*\)/\1/g" | xargs -L 1 git push $gitremotedefault --delete';
+
+# === Git adds ===
+alias gitaa='git add . -Av';
+alias gitap='git add -p';
+alias gitaap='git add . -Ap';
+alias gitacf='gitap; gitcae; gitpf';
+
+# === Git cherry-picks ===
+alias gitcp='git cherry-pick';
+function gitcpa() { a="$1"; b="$2"; if [ -z "$b" ] && [ -z "${a##*[!0-9]*}" ]; then b="$a"; a=""; fi; \
+                    git fetch $gitremotedefault $(getine $b $gitbranchdefault); git cherry-pick FETCH_HEAD~$(getine $a 0); }
+
+# === Git stash ===
+alias gits='git stash';
+alias gitsp='git stash -p';
+alias gitsu='git stash -u';
+alias gitspop='git stash pop';
+
+# === Git review ===
+function gitpushreview() { if [[ "$2" != "." ]]; then projectpath="$1/$2" ; else projectpath="$1"; fi;
+                           projectname=$(git remote -v | grep $2 | tail -1 | cut -f 2 | sed "s/.*\/\([^.]*\).* .*/\1/"); \
+                           command="git push $projectpath/$projectname HEAD:refs/$(getine $3 for)/$(getine $4 $gitbranchdefault)"; \
+                           echo ""; echo " $command"; printf "  > Proceed with review upload (y/N) ? "; read key; \
+                           if [[ "$key" == "y" || "$key" == "Y" ]]; then echo ""; $command; fi; echo ""; }
+alias gitpr='gitpushreview ssh://$gituserdefault@review.cyanogenmod.org:29418 CyanogenMod for';
+alias gitpg='gitpushreview ssh://$gituserdefault@review.cyanogenmod.org:29418 CyanogenMod heads';
+alias gitprh='gitpushreview http://review.cyanogenmod.org CyanogenMod for';
+alias gitpgh='gitpushreview http://review.cyanogenmod.org CyanogenMod heads';
+alias gitpraicp='gitpushreview ssh://AdrianDC@gerrit.aicp-rom.com:29418 AICP for';
+alias gitpraicpl='gitpushreview ssh://AdrianDC@gerrit.aicp-rom.com:29418 AICP for lp5.1';
+alias gitprhaicp='gitpushreview http://gerrit.aicp-rom.com AICP for';
+alias gitpr7='gitpushreview ssh://$gituserdefault@review.msm7x30.org:29418 LegacyXperia for';
+alias gitpr7h='gitpushreview http://review.msm7x30.org LegacyXperia for';
+alias gitpromni='gitpushreview ssh://$gituserdefault@gerrit.omnirom.org:29418 . for';
+alias gitpromnih='gitpushreview http://gerrit.omnirom.org . for';
+
+# === Git drafts ===
+function gitpushdrafts() { if [[ "$2" != "." ]]; then projectpath="$1/$2" ; else projectpath="$1"; fi;
+                           projectname=$(git remote -v | grep $2 | tail -1 | cut -f 2 | sed "s/.*\/\([^.]*\).* .*/\1/"); \
+                           command="git push $projectpath/$projectname HEAD:refs/drafts/$(getine $3 $gitbranchdefault)"; \
+                           echo ""; echo " $command"; printf "  > Proceed with review upload (y/N) ? "; read key; \
+                           if [[ "$key" == "y" || "$key" == "Y" ]]; then echo ""; $command; fi; echo ""; }
+alias gitprd='gitpushdrafts ssh://$gituserdefault@review.cyanogenmod.org:29418 CyanogenMod';
+alias gitprdh='gitpushdrafts http://review.cyanogenmod.org CyanogenMod';
+alias gitpr7d='gitpushdrafts ssh://$gituserdefault@review.msm7x30.org:29418 LegacyXperia';
+alias gitpr7dh='gitpushdrafts http://review.msm7x30.org LegacyXperia';
+alias gitpromnid='gitpushdrafts ssh://$gituserdefault@gerrit.omnirom.org:29418 .';
+alias gitpromnidh='gitpushdrafts http://gerrit.omnirom.org .';
+
+# === Git tools ===
+alias gitd='git diff';
+alias gitlo='git log --pretty=oneline';
+alias gitlc='git show --name-only --oneline';
+function gitsf() { echo ""; for i in `seq 1 $(getine $1 1)`; do
+                     gitlc HEAD~$(($i-1)); echo ""; done; }
+function gitsfd() { echo ""; for i in $(git log --format=format:%H -- $(getine $1)); do
+                      gitlc $i; echo ""; printf " > Press Enter... "; read key; done; }
+alias gitmt='git mergetool';
+alias githi='git update-index --assume-unchanged';
+alias gitsh='git update-index --no-assume-unchanged';
+alias gitlod='git log --pretty=oneline --';
+function gitloc() { path=$(xdg-user-dir DESKTOP);
+                    git log --pretty=oneline --no-merges HEAD -- . | tee $path/gitloc$1.full.log;
+                    cat $path/gitloc$1.full.log | cut -c 42-| sort | tee $path/gitloc$1.comp.log; }
+function gitlos()
+{
+  if [ ! -z "$2" ]; then cnt=$2; else cnt=30; fi;
+  echo -e " \e[1;37mSearching for $1 in last $cnt commits...\e[0m";
+  echo "";
+  for sha1 in $(git log --max-count=$cnt --format=format:%H -- .); do
+    if [ ! -z "$(git show $sha1 | grep -i "$1")" ]; then
+      git show --name-only --oneline $sha1; echo "";
+    fi;
+  done;
+}
+
+# === Git repos / folders comparator ===
+function gitlodc()
+{
+  dirlog=$(getine $3 ".");
+  sortlog=1;
+  if [ ! -z "$4" ]; then
+    sortlog=0;
+  fi;
+  if [ -z "$2" ]; then
+    echo " Usage: gitlodc repo_one_path repo_two_path sub_folder (sort:0/1)";
+    return;
+  fi;
+
+  dircur=$(pwd);
+  tmpdir=$(mktemp -d);
+  cd "$1";
+  gitlod "$dirlog" | cut -d' ' -f2- > "$tmpdir/gitdir1.log";
+  if [ $sortlog ]; then
+    sort "$tmpdir/gitdir1.log" -o "$tmpdir/gitdir1.log";
+  fi;
+  cd "$2";
+  gitlod "$dirlog" | cut -d' ' -f2- > "$tmpdir/gitdir2.log";
+  if [ $sortlog ]; then
+    sort "$tmpdir/gitdir2.log" -o "$tmpdir/gitdir2.log";
+  fi;
+  meld "$tmpdir/gitdir1.log" "$tmpdir/gitdir2.log";
+  rm -rf "$tmpdir";
+  cd "$dircur";
+}
+
+# === Git kernels meld  ===
+function gitkmeld()
+{
+  subdir=$(getine $2 "");
+  if [ -z "$1" ]; then
+    echo " Usage: gitkmeld second_kernel_path sub_folder";
+    return;
+  fi;
+
+  meld ./$subdir/ $1/$subdir/;
+}
+
+# === Git killers ===
+function gitonebranch() { \
+                          git fetch origin;
+                          git branch -r | sed 's/origin\/\(.*\)/\1/' \
+                                        | grep -v "HEAD" \
+                                        | grep -v $(git rev-parse --abbrev-ref HEAD) \
+                                        | xargs -I {} sh -c 'printf " Removing branch {} : "; git push origin :{};';
+                          git tag -l | xargs -I {} sh -c 'printf " Removing tag {} : "; git push origin :{}; printf "  "; git tag -d {};';
+                        }
+
+# === Compilations ===
+alias kernelcfg='make ARCH=arm CROSS_COMPILE=arm-linux-androideabi- cm_viskan_huashan_defconfig; \
+                 cp -fv ./.config ./arch/arm/configs/cm_viskan_huashan_defconfig; rm -f ./.config';
+alias kernelcln='rm ';
+
+# === Linux Commands ===
+function gohibernate() { \
+                         sudo swapon -a; \
+                         sudo swapon -s; \
+                         sudo pm-hibernate; \
+                       }
+
+# === BACKUP : Git patchs ===
+function gitacp() { \
+                    clear; url=$1; echo $url; \
+                    url="http://kernel.opensuse.org/cgit/kernel/patch/?id=620e5050827008ab207a8dfcc44cb79f07f1942c"; \
+                    #if [[ ! $url =~ '.patch' ]]; then url='$url.patch'; fi; \
+                    curl -s $url 2>nul > /tmp/bash_android_tmp.patch; \
+                    git apply --stat "/tmp/bash_android_tmp.patch"; \
+                    git apply --check "/tmp/bash_android_tmp.patch"; \
+                  }
+function gitapp() { \
+                    clear; url=$1; echo $url; \
+                    if [[ ! $url =~ '.patch' ]]; then url='$url.patch'; fi; \
+                    patch=$(curl -s $url 2>nul); \
+                    git apply --3way '$patch'; \
+                  }
+
+
+# === BACKUP : gerrit-cherry-pick ===
+alias gerrit-cherry-pick='if ! hash gerrit-cherry-pick 2>/dev/null; then \
+                            curl -Lo ~/bin/gerrit-cherry-pick http://review.cyanogenmod.org/tools/bin/gerrit-cherry-pick; \
+                            chmod +x ~/bin/gerrit-cherry-pick; \
+                          fi; \
+                          gerrit-cherry-pick';
+
